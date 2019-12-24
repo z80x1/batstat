@@ -6,12 +6,16 @@
 
 #define PATH "/sys/class/power_supply/"
 #define LOG_P 20
+#define MILLION 1000000
 using namespace std;
 
 int refreshRate = 3;
 //const string logFile = "log.txt";
 
-float maxEnergy, currentPower, currentEnergy, initEnergy;
+float maxCharge, currentCharge, initCharge; // Ah*1E-6
+float currentPower; // W
+float currentVoltage; // V * 1E-6
+float volt_min; // /sys/class/power_supply/BAT0/voltage_min_design in Volts
 int initTime, percent, timeNow, timeElapsed = -refreshRate;
 int lastTime = 0, logIndex = 0;
 string Path = PATH, status;
@@ -48,22 +52,31 @@ void init()
 
 	bkgd(COLOR_PAIR(1));
 
-	ifstream enNow(Path+"energy_now");
-	enNow >> initEnergy;
+	ifstream chNow(Path+"charge_now");
+	chNow >> initCharge;
+
+	ifstream ifVoltMin(Path+"voltage_min_design");
+    ifVoltMin >> volt_min;
+    volt_min /= MILLION;
 	
 	initTime = time(NULL);
 	
-	ifstream maxEnergyFile(Path+"energy_full");
-	maxEnergyFile >> maxEnergy;
+	ifstream maxChargeFile(Path+"charge_full");
+	maxChargeFile >> maxCharge;
 }
 
 void refreshValues()
 {
-	ifstream powNow(Path+"power_now");
-	ifstream enNow(Path+"energy_now");
+    float I;
+    ifstream volNow(Path+"voltage_now");
+	ifstream curNow(Path+"current_now");
+	ifstream chNow(Path+"charge_now");
 	ifstream st(Path+"status");
-	powNow >> currentPower;
-	enNow >> currentEnergy;
+    
+	curNow >> I;
+	volNow >> currentVoltage;
+    currentPower = I/MILLION * currentVoltage/MILLION;
+	chNow >> currentCharge;
 	timeNow = time(NULL);
 	//timeElapsed = timeElapsed + timeNow - lastTime;
 	timeElapsed += refreshRate;
@@ -71,53 +84,59 @@ void refreshValues()
 	st >> status;
 }
 
+#if 0
 void print()
 {
 	system("clear");
 	printf("%-30s%s\n", "Status: ", status.c_str());
-	printf("%-30s%.2lf Wh\n", "Max energy:", maxEnergy/1000000);
-	printf("%-30s%.2lf Wh\n", "Energy left:", currentEnergy/1000000);
-	printf("%-30s%.2lf W\n", "Power Consumption:", currentPower/1000000);
-	printf("%-30s%.2lf\%\n", "Percentage left:", currentEnergy/maxEnergy*100);
-	printf("%-30s%2d:%2d:%2d since %.2lf\%\n", "Time elapsed:", timeElapsed/3600, (timeElapsed/60)%60, timeElapsed%60, initEnergy/maxEnergy*100);
+	printf("%-30s%.2lf Wh\n", "Max energy:", maxCharge/1000000*volt_min);
+	printf("%-30s%.2lf Wh\n", "Energy left:", currentCharge/1000000*volt_min);
+	printf("%-30s%.2lf W\n", "Power Consumption:", currentPower);
+	printf("%-30s%.2lf\%\n", "Percentage left:", currentCharge/maxCharge*100);
+	printf("%-30s%2d:%2d:%2d since %.2lf\%\n", "Time elapsed:", timeElapsed/3600, (timeElapsed/60)%60, timeElapsed%60, initCharge/maxCharge*100);
 }
+#endif
 
 void newPrint()
 {
 	char buff[255];
-	erase();
+	int line = 0;
+    erase();
 	sprintf(buff, "%-30s\n", "Status: ");
-	mvaddstr(0, 0, buff);
+	mvaddstr(line, 0, buff);
 	
 	if(status[0] == 'C')
 		attron(COLOR_PAIR(3));
 	else
 		attron(COLOR_PAIR(2));
-	mvaddstr(0, strlen(buff) - 1, status.c_str());
-
+	mvaddstr(line, strlen(buff) - 1, status.c_str());
 
 	attron(COLOR_PAIR(1));
-	sprintf(buff, "%-30s%.2lf Wh\n", "Max energy:", maxEnergy/1000000);
-	mvaddstr(1, 0, buff);
-	sprintf(buff, "%-30s%.2lf Wh\n", "Energy left:", currentEnergy/1000000);
-	mvaddstr(2, 0, buff);
-	sprintf(buff, "%-30s%.2lf W\n", "Power Consumption:", currentPower/1000000);
-	mvaddstr(3, 0, buff);
-	sprintf(buff, "%-30s%.2lf%%\n", "Percentage left:", currentEnergy/maxEnergy*100);
-	mvaddstr(4, 0, buff);
-	sprintf(buff, "%-30s%.2lf W\n", "Average power Consumption:", (initEnergy - currentEnergy) / 1000000 / (1. * timeElapsed / 3600.));
+	sprintf(buff, "%-30s%.2lf Wh\n", "Max energy:", maxCharge/1000000*volt_min);
+	mvaddstr(++line, 0, buff);
+	sprintf(buff, "%-30s%.2lf Wh\n", "Energy left:", currentCharge/1000000*volt_min);
+	mvaddstr(++line, 0, buff);
+	sprintf(buff, "%-30s%.2lf V\n", "Voltage:", currentVoltage/MILLION);
+	mvaddstr(++line, 0, buff);
+	sprintf(buff, "%-30s%.2lf W\n", "Power Consumption:", currentPower);
+	mvaddstr(++line, 0, buff);
+	sprintf(buff, "%-30s%.2lf%%\n", "Percentage left:", currentCharge/maxCharge*100);
+	mvaddstr(++line, 0, buff);
+	sprintf(buff, "%-30s%.2lf W\n", "Average power Consumption:", (initCharge - currentCharge) / 1000000 / (1. * timeElapsed / 3600.));
 	ofstream ferr("log.txt");
-	ferr << initEnergy - currentEnergy << " Whr" << endl;
+	ferr << initCharge - currentCharge << " Whr" << endl;
 	ferr << (1. * timeElapsed / 3600.) << " s" << endl;
-	mvaddstr(5, 0, buff);
-	sprintf(buff, "%-30s%2d:%2d:%2d since %.2lf%%\n", "Time elapsed:", timeElapsed/3600, (timeElapsed/60)%60, timeElapsed%60, initEnergy/maxEnergy*100);
-	mvaddstr(6, 0, buff);
+	mvaddstr(++line, 0, buff);
+	sprintf(buff, "%-30s%2d:%2d:%2d since %.2lf%%\n", "Time elapsed:", timeElapsed/3600, (timeElapsed/60)%60, timeElapsed%60, initCharge/maxCharge*100);
+	mvaddstr(++line, 0, buff);
 
 	sprintf(buff, "= Time   ======== Percent ============================================\n");
-	mvaddstr(7, 0, buff);
+	mvaddstr(++line, 0, buff);
 
-	for(int i = logIndex; i < logCache.size(); i++)
-		mvaddstr(8 + i - logIndex, 0, logCache[i].c_str());
+    ++line;
+	for(int i = logIndex; i < logCache.size(); i++) {
+		mvaddstr(line + i - logIndex, 0, logCache[i].c_str());
+    }
 
 	refresh();
 }
@@ -125,7 +144,7 @@ void newPrint()
 void addLog()
 {
 	char buff[200];
-	sprintf(buff, "%2d:%2d:%2d          %.2lf\%\n", timeElapsed/3600, (timeElapsed/60)%60, timeElapsed%60, currentEnergy/maxEnergy*100);
+	sprintf(buff, "%2d:%2d:%2d          %.2lf\%\n", timeElapsed/3600, (timeElapsed/60)%60, timeElapsed%60, currentCharge/maxCharge*100);
 	logCache.push_back(buff);
 }
 
